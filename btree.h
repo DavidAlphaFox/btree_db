@@ -57,6 +57,7 @@ struct btree_super {
 } __attribute__((packed));
 
 struct btree {
+	// 记录
 	off_t top;
 	off_t free_top;
 	off_t alloc;

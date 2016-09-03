@@ -88,18 +88,23 @@ static struct btree_table *alloc_table(struct btree *btree)
 
 static struct btree_table *get_table(struct btree *btree, off_t offset)
 {
+	// 确保offset是不等于0的
 	assert(offset != 0);
 
 	/* take from cache */
+	// 是否在cache中
 	struct btree_cache *slot = &btree->cache[offset % CACHE_SLOTS];
+	// cache命中了
 	if (slot->offset == offset) {
+		// 返回table
 		slot->offset = 0;
 		return slot->table;
 	}
-
+	// 没命中的话
 	struct btree_table *table = malloc(sizeof *table);
-
+	// 直接文件设置偏移
 	lseek(btree->fd, offset, SEEK_SET);
+	// 读取相应的数据到内存中
 	if (read(btree->fd, table, sizeof *table) != (ssize_t) sizeof *table) {
 		fprintf(stderr, "btree: I/O error\n");
 		abort();
@@ -129,10 +134,12 @@ static void flush_table(struct btree *btree, struct btree_table *table,
 	assert(offset != 0);
 
 	lseek(btree->fd, offset, SEEK_SET);
+	// 在指定的位置写入表
 	if (write(btree->fd, table, sizeof *table) != (ssize_t) sizeof *table) {
 		fprintf(stderr, "btree: I/O error\n");
 		abort();
 	}
+	// 重新缓存table
 	put_table(btree, table, offset);
 }
 
@@ -218,6 +225,7 @@ static off_t alloc_chunk(struct btree *btree, size_t len)
 		/* find free chunk with the larger or the same size/SHA-1 */
 		in_allocator = 1;
 		delete_larger = 1;
+		// 得到要写入数据的位置
 		offset = delete_table(btree, btree->free_top, sha1);
 		delete_larger = 0;
 		if (offset) {
@@ -249,11 +257,14 @@ static off_t alloc_chunk(struct btree *btree, size_t len)
 	}
 	if (offset == 0) {
 		/* not found, allocate from the end of the file */
+		// 没找到一个合适的空间
+		// 让offset为btree->alloc,从已经分配的文件中，开始进一步的分配
 		offset = btree->alloc;
 		/* TODO: this wastes memory.. */
 		if (offset & (len - 1)) {
 			offset += len - (offset & (len - 1));
 		}
+		// 重新设置分配的空间
 		btree->alloc = offset + len;
 	}
 	flush_super(btree);
@@ -305,6 +316,7 @@ static void free_chunk(struct btree *btree, off_t offset, size_t len)
 	/* add buddy information */
 	memset(sha1, 0, sizeof sha1);
 	*(__be64 *) sha1 = to_be64(offset);
+
 	insert_toplevel(btree, &btree->free_top, sha1, NULL, len);
 
 	/* add allocation information */
@@ -457,11 +469,12 @@ static off_t take_smallest(struct btree *btree, off_t table_offset,
    is stored to 'sha1'. Returns offset to the item */
 static off_t take_largest(struct btree *btree, off_t table_offset,
 			     uint8_t *sha1)
-{
+{	// 得到表
 	struct btree_table *table = get_table(btree, table_offset);
 	assert(table->size > 0);
 
 	off_t offset = 0;
+	// 得到最后一个节点的子节点
 	off_t child = from_be64(table->items[table->size].child);
 	if (child == 0) {
 		offset = remove_table(btree, table, table->size - 1, sha1);
@@ -484,36 +497,41 @@ static off_t remove_table(struct btree *btree, struct btree_table *table,
 			     size_t i, uint8_t *sha1)
 {
 	assert(i < table->size);
-
+	// 将要删除的sha1放到传入参数中
 	if (sha1)
 		memcpy(sha1, table->items[i].sha1, SHA1_LENGTH);
-
+	// 得到自己的offset，left的offset和right的offset
 	off_t offset = from_be64(table->items[i].offset);
 	off_t left_child = from_be64(table->items[i].child);
 	off_t right_child = from_be64(table->items[i + 1].child);
-
+	// 左侧和右侧都有数据
 	if (left_child != 0 && right_child != 0) {
 	        /* replace the removed item by taking an item from one of the
 	           child tables */
 		off_t new_offset;
 		if (rand() & 1) {
+			// 从左侧找出最小的
 			new_offset = take_largest(btree, left_child,
 						  table->items[i].sha1);
 			table->items[i].child =
 				to_be64(collapse(btree, left_child));
 		} else {
+			// 从右侧找出最小的
 			new_offset = take_smallest(btree, right_child,
 						   table->items[i].sha1);
 			table->items[i + 1].child =
 				to_be64(collapse(btree, right_child));
 		}
+		// 新的i的位置的offset
 		table->items[i].offset = to_be64(new_offset);
 
 	} else {
+		// 整体向前移动过一下
 		memmove(&table->items[i], &table->items[i + 1],
 			(table->size - i) * sizeof(struct btree_item));
+		// 减少table的大小
 		table->size--;
-
+		// 如果左侧节点不空
 		if (left_child != 0)
 			table->items[i].child = to_be64(left_child);
 		else
@@ -606,16 +624,20 @@ static void dump_sha1(const uint8_t *sha1)
 static off_t delete_table(struct btree *btree, off_t table_offset,
 			   uint8_t *sha1)
 {
+	// 如果table_offset 是 0,那么直接返回0
 	if (table_offset == 0)
 		return 0;
+	// 得到offset所指向的表
 	struct btree_table *table = get_table(btree, table_offset);
 
 	size_t left = 0, right = table->size;
+	// 二分查找
 	while (left < right) {
 		size_t i = (right - left) / 2 + left;
 		int cmp = cmp_sha1(sha1, table->items[i].sha1);
 		if (cmp == 0) {
 			/* found */
+			// 找到了相应的表项
 			off_t ret = remove_table(btree, table, i, sha1);
 			flush_table(btree, table, table_offset);
 			return ret;
@@ -627,6 +649,7 @@ static off_t delete_table(struct btree *btree, off_t table_offset,
 	}
 
 	/* not found - recursion */
+	// 如果没找到
 	size_t i = left;
 	off_t child = from_be64(table->items[i].child);
 	off_t ret = delete_table(btree, child, sha1);
@@ -668,21 +691,25 @@ off_t insert_toplevel(struct btree *btree, off_t *table_offset,
 		flush_table(btree, table, *table_offset);
 	} else {
 		//第一次插入的时候
-		//table_offset一定是0
+		//table_offset一定是0(btree->top)
 		ret = offset = insert_data(btree, data, len);
 	}
 
 	/* create new top level table */
+	// 创建一个新的btree表
 	struct btree_table *new_table = alloc_table(btree);
+	// 初始大小为1
 	new_table->size = 1;
 	memcpy(new_table->items[0].sha1, sha1, SHA1_LENGTH);
+	// 设置offset
 	new_table->items[0].offset = to_be64(offset);
 	new_table->items[0].child = to_be64(*table_offset);
 	new_table->items[1].child = to_be64(right_child);
 
 	off_t new_table_offset = alloc_chunk(btree, sizeof *new_table);
+	// 将表写到新的位置上
 	flush_table(btree, new_table, new_table_offset);
-
+	//改变了btree->top的位置
 	*table_offset = new_table_offset;
 
 	/* make sure the table is written before a reference is added to it */
@@ -696,7 +723,8 @@ void btree_insert(struct btree *btree, const uint8_t *c_sha1, const void *data,
 	/* SHA-1 must be in writable memory */
 	uint8_t sha1[SHA1_LENGTH];
 	memcpy(sha1, c_sha1, sizeof sha1);
-
+	// 从btree的top处开始插入数据
+	// 这个操作会改变btree->top的指向
 	insert_toplevel(btree, &btree->top, sha1, data, len);
 	free_queued(btree);
 	flush_super(btree);
@@ -709,6 +737,7 @@ void btree_insert(struct btree *btree, const uint8_t *c_sha1, const void *data,
 static off_t lookup(struct btree *btree, off_t table_offset,
 		    const uint8_t *sha1)
 {
+	// offset 为0 直接返回0
 	if (table_offset == 0)
 		return 0;
 	struct btree_table *table = get_table(btree, table_offset);
@@ -734,7 +763,7 @@ static off_t lookup(struct btree *btree, off_t table_offset,
 	put_table(btree, table, table_offset);
 	return lookup(btree, child, sha1);
 }
-
+// 通过key查找数据
 void *btree_get(struct btree *btree, const uint8_t *sha1, size_t *len)
 {
 	off_t offset = lookup(btree, btree->top, sha1);
