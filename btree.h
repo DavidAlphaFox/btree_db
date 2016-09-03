@@ -24,7 +24,10 @@ typedef uint64_t BITWISE __be64; /* big endian, 64 bits */
 #define SHA1_LENGTH	20
 
 #define CACHE_SLOTS	23 /* prime */
-
+// btree的一个项
+// 首先是20bytes的sha1
+// 接着是8bytes的偏移
+// 再接着是8bytes的子节点
 struct btree_item {
 	uint8_t sha1[SHA1_LENGTH];
 	__be64 offset;
@@ -32,21 +35,21 @@ struct btree_item {
 } __attribute__((packed));
 
 #define TABLE_SIZE	((4096 - 1) / sizeof(struct btree_item))
-
+// btree一个表的大小
 struct btree_table {
 	struct btree_item items[TABLE_SIZE];
 	uint8_t size;
 } __attribute__((packed));
-
+// btree的缓存大小
 struct btree_cache {
 	off_t offset;
 	struct btree_table *table;
 };
-
+// 内容信息
 struct blob_info {
 	__be32 len;
 };
-
+// 超级节点定义
 struct btree_super {
 	__be64 top;
 	__be64 free_top;
@@ -58,6 +61,7 @@ struct btree {
 	off_t free_top;
 	off_t alloc;
 	int fd;
+	// 23个缓存位置
 	struct btree_cache cache[CACHE_SLOTS];
 };
 

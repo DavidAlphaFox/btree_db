@@ -154,17 +154,18 @@ int btree_open(struct btree *btree, const char *fname)
 }
 
 static void flush_super(struct btree *btree);
-
+// 创建一个新的btree表
 int btree_creat(struct btree *btree, const char *fname)
 {
+	//清空btree结构
 	memset(btree, 0, sizeof *btree);
-
+	//btree结构体的句柄指向特定文件
 	btree->fd = open(fname, O_RDWR | O_TRUNC | O_CREAT | O_BINARY, 0644);
 	if (btree->fd < 0)
 		return -1;
-
+	//分配信息位图
 	btree->alloc = sizeof(struct btree_super);
-
+	//写入超级块
 	flush_super(btree);
 	return 0;
 }
@@ -203,7 +204,7 @@ static void free_chunk(struct btree *btree, off_t offset, size_t len);
 static off_t alloc_chunk(struct btree *btree, size_t len)
 {
 	assert(len > 0);
-
+	// 取2的整数
 	len = round_power2(len);
 
 	off_t offset = 0;
@@ -338,12 +339,16 @@ static void free_queued(struct btree *btree)
 static void flush_super(struct btree *btree)
 {
 	struct btree_super super;
+	// 清空一个
 	memset(&super, 0, sizeof super);
+	// 超级节点
+	// 第一分写入的时候，alloc为super节点的大小
 	super.top = to_be64(btree->top);
 	super.free_top = to_be64(btree->free_top);
 	super.alloc = to_be64(btree->alloc);
-
+	// 回到文件头
 	lseek(btree->fd, 0, SEEK_SET);
+	// 将超级块写入，写失败强制退出
 	if (write(btree->fd, &super, sizeof super) != sizeof super) {
 		fprintf(stderr, "btree: I/O error\n");
 		abort();
@@ -354,11 +359,11 @@ static off_t insert_data(struct btree *btree, const void *data, size_t len)
 {
 	if (data == NULL)
 		return len;
-
+	// 填充数据块信息
 	struct blob_info info;
 	memset(&info, 0, sizeof info);
 	info.len = to_be32(len);
-
+	// 分配块，得到所在块在文件的偏移位置
 	off_t offset = alloc_chunk(btree, sizeof info + len);
 
 	lseek(btree->fd, offset, SEEK_SET);
@@ -648,6 +653,7 @@ off_t insert_toplevel(struct btree *btree, off_t *table_offset,
 	off_t offset = 0;
 	off_t ret = 0;
 	off_t right_child = 0;
+	// table的偏移不为0的时候
 	if (*table_offset != 0) {
 		ret = insert_table(btree, *table_offset, sha1, data, len);
 
@@ -661,6 +667,8 @@ off_t insert_toplevel(struct btree *btree, off_t *table_offset,
 		right_child = split_table(btree, table, sha1, &offset);
 		flush_table(btree, table, *table_offset);
 	} else {
+		//第一次插入的时候
+		//table_offset一定是0
 		ret = offset = insert_data(btree, data, len);
 	}
 
